@@ -1,0 +1,75 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from keras.models import load_model
+from keras.metrics import MeanIoU
+import glob
+
+model_path = 'model.hdf5'
+my_model = load_model(model_path, compile=False)
+
+val_img_dir = "input_data_128/val/images/"
+val_mask_dir = "input_data_128/val/masks/"
+
+def load_npy_image(image_path):
+    return np.load(image_path)
+
+
+img_num = 163
+test_img_path = f"{val_img_dir}image_{img_num}.npy"
+test_mask_path = f"{val_mask_dir}mask_{img_num}.npy"
+
+test_img = load_npy_image(test_img_path)
+test_mask = load_npy_image(test_mask_path)
+test_mask_argmax = np.argmax(test_mask, axis=3)
+
+test_img_input = np.expand_dims(test_img, axis=0)
+test_prediction = my_model.predict(test_img_input)
+test_prediction_argmax = np.argmax(test_prediction, axis=4)[0]
+
+n_slice = 70
+
+plt.figure(figsize=(12, 8))
+plt.subplot(231)
+plt.title('Testing Image')
+plt.imshow(test_img[:, :, n_slice, 1], cmap='gray')
+plt.subplot(232)
+plt.title('Testing Label')
+plt.imshow(test_mask_argmax[:, :, n_slice])
+plt.subplot(233)
+plt.title('Prediction on test image')
+plt.imshow(test_prediction_argmax[:, :, n_slice])
+plt.show()
+
+
+batch_size = 8
+test_mask_batch_argmax = np.argmax(test_mask, axis=3) 
+
+IOU_keras = MeanIoU(num_classes=4)
+IOU_keras.update_state(test_prediction_argmax, test_mask_argmax)
+print("Mean IoU =", IOU_keras.result().numpy())
+
+def dice_coefficient(y_true, y_pred,num_classes=4,smooth=1e-6):
+    dice = []
+    for i in range(num_classes):
+        y_true_i = (y_true == i).astype(np.float32)  # Convert to binary mask for class i
+        y_pred_i = (y_pred == i).astype(np.float32)  # Convert to binary mask for class i
+        
+        intersection = np.sum(y_true_i * y_pred_i)
+        dice_i = (2. * intersection + smooth) / (np.sum(y_true_i) + np.sum(y_pred_i) + smooth)
+        dice.append(dice_i)
+    
+    return np.mean(dice)  # Average Dice score across all classes
+    #intersection = np.sum(y_true * y_pred)
+    #return (2. * intersection + smooth) / (np.sum(y_true) + np.sum(y_pred) + smooth)
+
+dice_score = dice_coefficient(test_mask_argmax, test_prediction_argmax)
+print("Dice Coefficient =", dice_score)
+
+
+def sensitivity(y_true, y_pred):
+    tp = np.sum((y_true == 1) & (y_pred == 1))
+    fn = np.sum((y_true == 1) & (y_pred == 0))
+    return tp / (tp + fn + 1e-6) 
+
+sensitivity_score = sensitivity(test_mask_argmax, test_prediction_argmax)
+print("Sensitivity =", sensitivity_score)
